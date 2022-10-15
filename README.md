@@ -1,5 +1,6 @@
 # BulletHell
 Love2D Bullet Hell Starting game 
+Love2D version 11.4 Oct 15 2022
 
 Just Playing around with Love2D for the first time and put this together without any real direction.. (as it shows) 
 
