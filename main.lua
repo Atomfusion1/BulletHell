@@ -1,5 +1,6 @@
 local anim8 = require("src/anim8/anim8")
 local moonshine = require('shader')
+--local paddy = 	require("src/paddy-master/paddy")
 
 math.randomseed(os.time())
 
@@ -12,6 +13,7 @@ local gameState = {
     mobUpgrade = 10,
     mobUpgradeTimer = 0,
     playerUpgrade = 0,
+    windowIsPaused = false,
 
 }
 gameState.spawnRate = 60/gameState.mobsPerMin
@@ -116,9 +118,9 @@ music[6]:setVolume(.05)
 
 -- Sound Effects 
 local effects = {
-    love.audio.newSource("efx/pistol.mp3 ", "static"),
-    love.audio.newSource("efx/explosion1.wav ", "static"),
-    love.audio.newSource("efx/explosion2.wav ", "static")
+    love.audio.newSource("efx/pistol.mp3", "static"),
+    love.audio.newSource("efx/explosion1.wav", "static"),
+    love.audio.newSource("efx/explosion2.wav", "static")
 }
 
 -- Brackground Images 
@@ -170,11 +172,14 @@ local player = {
         r = .7, 
         g = 0, 
         b = 0, 
-        alpha = .6
+        alpha = .6,
+        upgradePoints = 0,
+        selection = 1,
+        selectionTimer = 0,
     },
     bulletTable = {
     },
-    velocity = 4,
+    velocity = 2,
     animations = {},
     efx = true,
     score = 0,
@@ -198,7 +203,7 @@ local mobs = {
         h = 25,
         w = 25,
         rot = 0,
-        scale = 8,
+        scale = 2,
     },
     hitPoints = {
         current = 50,
@@ -221,6 +226,7 @@ local mobs = {
         g = 1,
         b = 1,
         alpha = 1,
+        upgradePoints = 0
     },
     bulletTable = {
     },
@@ -405,9 +411,32 @@ function CheckForCollisions(tBullets, tMobs)
 
 end
 
+function CheckUpgrades()
+    if player.bullet.upgradePoints >= player.bullet.selection then
+    print('Upgrade Points')        
+        local selection = player.bullet.selection
+        if selection == 1 then
+            player.velocity = player.velocity + .5
+        elseif selection == 2 then
+            player.bullet.speed = player.bullet.speed + 10
+            player.bullet.coolDown = player.bullet.coolDown - player.bullet.coolDown/8
+        elseif selection == 3 then
+            player.hitPoints.current = player.hitPoints.current +2
+        elseif selection == 4 then
+            if player.bullet.bulletType ~= 'double' then
+                player.bullet.bulletType = 'double'
+            end
+        elseif selection == 5 then
+            bulletTableMob = {}
+        end
+        player.bullet.upgradePoints = player.bullet.upgradePoints - player.bullet.selection
+    end
+end
+
 -- Check Keyboard
 function CheckKeyboard(dt)
     -- Keyboard Controls
+    local playerSpeed = player.velocity
     if love.mouse.isDown(1) then
         -- PLAYER SHOOT 
         --player.bullet.timer, angle = FireBullet(player.position.x, player.position.y, love.mouse.getX(), love.mouse.getY(), bullets, player.bullet, dt, true, player.state)
@@ -416,22 +445,20 @@ function CheckKeyboard(dt)
     if love.mouse.isDown(2) then
         -- PLAYER SHOOT 
         --player.bullet.timer, angle = FireBullet(player.position.x, player.position.y, love.mouse.getX(), love.mouse.getY(), bullets, player.bullet, dt, true, player.state)
-        player.velocity = 8
-    else 
-        player.velocity = 4
+        playerSpeed = playerSpeed + playerSpeed
     end
     if love.keyboard.isDown('w') then
-        if player.position.y > 0 then player.position.y = player.position.y - player.velocity end
+        if player.position.y > 0 then player.position.y = player.position.y - playerSpeed end
     end
     local windowWidth, windowHeight = love.window.getMode()
     if love.keyboard.isDown('s') then
-        if player.position.y < windowHeight then player.position.y = player.position.y + player.velocity end
+        if player.position.y < windowHeight then player.position.y = player.position.y + playerSpeed end
     end
     if love.keyboard.isDown('a') then
-        if player.position.x > 0 then player.position.x = player.position.x - player.velocity end
+        if player.position.x > 0 then player.position.x = player.position.x - playerSpeed end
     end
     if love.keyboard.isDown('d') then
-        if player.position.x < windowWidth then player.position.x = player.position.x + player.velocity end
+        if player.position.x < windowWidth then player.position.x = player.position.x + playerSpeed end
     end
     if love.keyboard.isDown('space') then
         player.hitPoints.current = player.hitPoints.max
@@ -466,18 +493,27 @@ end
 function CheckForDeath(tCharacter)
     if tCharacter.state == 'sound' then
         effects[2]:stop()
-        effects[2]:setVolume(1)
+        effects[2]:setVolume(.05)
         effects[2]:setPitch(2)
         effects[2]:play()
-        if (player.hitPoints.current > 0) then   player.score = player.score + 1 end
+        if (player.hitPoints.current > 0 and tCharacter.position.scale == 5) then   
+            player.score = player.score + 5
+            player.bullet.upgradePoints = player.bullet.upgradePoints + 5
+        elseif (player.hitPoints.current > 0 and tCharacter.position.scale == 3) then
+            player.score = player.score + 3
+            player.bullet.upgradePoints = player.bullet.upgradePoints + 3
+        else
+            player.score = player.score + 1
+            player.bullet.upgradePoints = player.bullet.upgradePoints + 1
+        end
         tCharacter.state = 'exploding'
+        return true
     end
 end
 
 -- TODO split into multiple test scripts
 function love.load()
     love.graphics.setDefaultFilter("nearest", "nearest")
-    effect = moonshine(moonshine.effects.glow)
 end
 
 -- Change Mob Spawn Rate
@@ -522,42 +558,48 @@ end
 
 -- UPDATE ***********
 function love.update(dt)
-    -- house keeping
-    for i,mobs1 in ipairs(screenMobs) do
-        mobs1.animations.down:update(dt)
-    end
-    explosionAnim8.anim8:update(dt)
-    
-    IsAudioPlaying()
-    -- upgrades 
-    UpgradeMobs()
-    UpgradePlayer()
-    -- spawn mobs 
-    if love.timer.getTime() - gameState.timer >  gameState.spawnRate then
-        table.insert(screenMobs, deepcopy(mobs))
-        SpawnMob(screenMobs[#screenMobs])
-    end
-
-    -- Main Updates and Collision Checks 
-    UpdateBulletLocation(bulletTablePlayer, dt)
-    UpdateBulletLocation(bulletTableMob, dt)
-    CheckForCollisions(bulletTableMob, player) 
-    for i,mobs1 in ipairs(screenMobs) do
-        if (mobs1.state == 'spawn' and i > 1) then
-            table.remove(screenMobs, i)
-            print("dead")
+	-- Check the dpad for touch events
+	--paddy.update(dt)
+    if not gameState.windowIsPaused then
+        -- house keeping
+        for i,mobs1 in ipairs(screenMobs) do
+            mobs1.animations.down:update(dt)
         end
-        MobUpdates(mobs1)
-        FireBullet(mobs1, bulletTableMob, player.position.x, player.position.y, dt)
-        CheckForCollisions(bulletTablePlayer, mobs1) 
-        CheckForDeath(mobs1)
+        explosionAnim8.anim8:update(dt)
+        
+        IsAudioPlaying()
+        -- upgrades 
+        UpgradeMobs()
+        --UpgradePlayer()
+        -- spawn mobs 
+        if love.timer.getTime() - gameState.timer >  gameState.spawnRate then
+            table.insert(screenMobs, deepcopy(mobs))
+            SpawnMob(screenMobs[#screenMobs])
+        end
+
+        -- Main Updates and Collision Checks 
+        UpdateBulletLocation(bulletTablePlayer, dt)
+        UpdateBulletLocation(bulletTableMob, dt)
+        CheckForCollisions(bulletTableMob, player) 
+        for i,mobs1 in ipairs(screenMobs) do
+            MobUpdates(mobs1)
+            FireBullet(mobs1, bulletTableMob, player.position.x, player.position.y, dt)
+            CheckForCollisions(bulletTablePlayer, mobs1) 
+            if CheckForDeath(mobs1) then 
+                if i == 1 then
+                    mobs1.state = 'spawn'
+                else table.remove(screenMobs, i)
+                print("dead 2")
+                end
+            end
+        end
+        CheckForDeath(player)
+        -- Check for Player Input 
+        CheckKeyboard(dt)
     end
-    CheckForDeath(player)
-    -- Check for Player Input 
-    CheckKeyboard(dt)
 end
 
-local function displayUI()
+local function DisplayUI()
     love.graphics.setColor(0,0,0,1)
     love.graphics.rectangle('fill', 0, 0, 230, 50)
     love.graphics.setColor(1,1,1,1)
@@ -582,13 +624,41 @@ local function displayUI()
     love.graphics.print("High Score:", 110, 30)
     love.graphics.setColor(1,1,1,1)
     love.graphics.print(player.highScore, 190, 30)
-    if (player.hitPoints.current < 1 ) then 
+    if (player.hitPoints.current < 1 ) then
         love.graphics.setColor(1,0,0,1)
         love.graphics.print("DEAD Press SPACE BAR", 100, 170, nil, 2)
     end
-
 end
 
+function UpgradeUI()
+    local windowH, windowW = love.window.getMode()
+    local setLength = 500
+    local upgradePrint = {'SPEEDUP', 'FIRERATE', 'HEALTH', 'MULTISHOT', '!'}
+    love.graphics.setColor(1,1,1,.8)
+    love.graphics.print(player.bullet.upgradePoints, 100, windowW - 70)
+    love.graphics.setColor(0,0,0,.6)
+    love.graphics.rectangle('fill', 100, windowW - 50, 500, 25)
+    love.graphics.setColor(1,1,1,.6)
+    love.graphics.rectangle('line', 100, windowW - 50, 500, 25)
+    for i=1,5 do
+        love.graphics.setColor(1,1,1,.6)
+        if not (player.bullet.bulletType == 'double' and i == 4) then love.graphics.print(upgradePrint[i], 20 + setLength/5*i, windowW - 45) end        
+        love.graphics.rectangle('line', setLength/5*i, windowW - 50, 500/5 , 25)
+        if player.bullet.upgradePoints == i then
+            love.graphics.setColor(1,1,.2,.2)
+            love.graphics.rectangle('fill', setLength/5*i, windowW - 50, 500/5 , 25)
+        elseif player.bullet.upgradePoints >= 6 then 
+            love.graphics.setColor(1,1,.2,.2)
+            love.graphics.rectangle('line', 100, windowW - 50, 500, 25)
+        end
+        if player.bullet.selection == i then 
+            love.graphics.setColor(1,0,0,.6)
+            love.graphics.rectangle('line', setLength/5*i, windowW - 50, 500/5 , 25)
+            if not (player.bullet.bulletType == 'double' and i == 4) then love.graphics.print(upgradePrint[i], 20 + setLength/5*i, windowW - 45) end
+        end
+
+    end
+end
 
 -- DRAW *********
 function love.draw()
@@ -670,20 +740,57 @@ function love.draw()
         end
     end
     -- Display Score 
-    displayUI()
+    DisplayUI()
+    UpgradeUI()
+    -- Draw the touchpad controls
+	--paddy.draw()
 end
 
 
 -- Keyboard and Mouse 
 function love.keypressed(key)
     if key == 'tab' then showCollisionBox = not showCollisionBox end
+    if key == 'p' then gameState.windowIsPaused = not gameState.windowIsPaused end
+    if key == "escape" then
+		love.event.quit()
+	end
+    if love.keyboard.isDown('q') then
+        player.bullet.selection = player.bullet.selection + 1
+        if player.bullet.selection > 5 then player.bullet.selection = 1 end
+    end
+    if love.keyboard.isDown('g') then
+        CheckUpgrades()
+    end
+    if love.keyboard.isDown('1') then
+        player.bullet.selection = 1
+        CheckUpgrades()
+    end
+    if love.keyboard.isDown('2') then
+        player.bullet.selection = 2
+        CheckUpgrades()
+    end
+    if love.keyboard.isDown('3') then
+        player.bullet.selection = 3
+        CheckUpgrades()
+    end
+    if love.keyboard.isDown('4') then
+        player.bullet.selection = 4
+        CheckUpgrades()
+    end
+    if love.keyboard.isDown('5') then
+        player.bullet.selection = 5
+        CheckUpgrades()
+    end
 end
 
 function love.keyreleased(key)
 end
 
-function love.mousepressed(x, y, button)
+function love.mousepressed(mx, my, button)
+
 end
 
 function love.mousereleased(x, y, button)
 end
+
+
